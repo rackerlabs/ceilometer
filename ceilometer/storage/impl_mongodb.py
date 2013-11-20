@@ -330,6 +330,8 @@ class Connection(base.Connection):
             self.db.authenticate(connection_options['username'],
                                  connection_options['password'])
 
+	self.conn.write_concern = {'w': 1, 'j': False}
+
         # NOTE(jd) Upgrading is just about creating index, so let's do this
         # on connection to be sure at least the TTL is correcly updated if
         # needed.
@@ -361,6 +363,8 @@ class Connection(base.Connection):
         self.db.event.ensure_index([('generated', pymongo.ASCENDING),
                                     ('event_name', pymongo.ASCENDING)],
                                    name='event_name_idx')
+
+	self.db.event.ensure_index('traits', name='event_traits_idx') 
 
         indexes = self.db.meter.index_information()
 
@@ -983,8 +987,8 @@ class Connection(base.Connection):
                 '_id': event.message_id,
                 'event_name': event.event_name,
                 'generated': event.generated,
-                'traits': dict((trait.name, trait.value)
-                               for trait in event.traits or []),
+                'traits': [{trait.name: trait.value}
+                           for trait in event.traits or []],
             }
 
             try:
