@@ -183,6 +183,7 @@ class Connection(base.Connection):
     """SqlAlchemy connection."""
 
     def __init__(self, conf):
+        self.uniquenames = {}
         url = conf.database.connection
         if url == 'sqlite://':
             conf.database.connection = \
@@ -816,6 +817,9 @@ class Connection(base.Connection):
 
            This may result in a flush.
         """
+        if key in self.uniquenames:
+            return self.uniquenames[key]
+
         if session is None:
             session = sqlalchemy_session.get_session()
         with session.begin(subtransactions=True):
@@ -824,6 +828,10 @@ class Connection(base.Connection):
                 unique = UniqueName(key=key)
                 session.add(unique)
                 session.flush()
+
+        if unique:
+            self.uniquenames[key] = unique
+        
         return unique
 
     def _make_trait(self, trait_model, event, session=None):
@@ -840,7 +848,10 @@ class Connection(base.Connection):
         if trait_model.dtype == api_models.Trait.DATETIME_TYPE:
             value = utils.dt_to_decimal(value)
         values[value_map[trait_model.dtype]] = value
-        return Trait(name, event, trait_model.dtype, **values)
+        values['name_id'] = name.id
+        values['event_id'] = event.id
+        values['t_type'] = trait_model.dtype
+        return values
 
     def _record_event(self, session, event_model):
         """Store a single Event, including related Traits.
@@ -857,8 +868,8 @@ class Connection(base.Connection):
             if event_model.traits:
                 for trait in event_model.traits:
                     t = self._make_trait(trait, event, session=session)
-                    session.add(t)
                     new_traits.append(t)
+                session.execute(Trait.__table__.insert(), new_traits)
 
         # Note: we don't flush here, explicitly (unless a new uniquename
         # does it). Otherwise, just wait until all the Events are staged.
