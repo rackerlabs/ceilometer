@@ -330,8 +330,6 @@ class Connection(base.Connection):
             self.db.authenticate(connection_options['username'],
                                  connection_options['password'])
 
-        self.conn.write_concern = {'w': 1, 'j': False}
-
         # NOTE(jd) Upgrading is just about creating index, so let's do this
         # on connection to be sure at least the TTL is correcly updated if
         # needed.
@@ -361,10 +359,10 @@ class Connection(base.Connection):
                                    name='timestamp_idx')
 
         self.db.event.ensure_index([('generated', pymongo.ASCENDING),
-                                    ('event_name', pymongo.ASCENDING)],
-                                   name='event_name_idx')
+                                    ('event_type', pymongo.ASCENDING)],
+                                   name='event_type_idx')
 
-        self.db.event.ensure_index('traits', name='event_traits_idx') 
+        self.db.event.ensure_index('traits', name='event_traits_idx')
 
         indexes = self.db.meter.index_information()
 
@@ -985,7 +983,7 @@ class Connection(base.Connection):
         for event in events:
             record = {
                 '_id': event.message_id,
-                'event_name': event.event_name,
+                'event_type': event.event_type,
                 'generated': event.generated,
                 'traits': [{trait.name: trait.value}
                            for trait in event.traits or []],
@@ -1015,7 +1013,7 @@ class Connection(base.Connection):
     @classmethod
     def _to_trait_models(cls, traits):
         t_models = []
-        for key, value in traits.iteritems():
+        for key, value in enumerate(traits):
             dtype = cls._get_trait_type(value)
             t_models.append(models.Trait(name=key, value=value,
                                          dtype=dtype))
@@ -1025,7 +1023,7 @@ class Connection(base.Connection):
     def _to_event_model(cls, event):
         traits = cls._to_trait_models(event['traits'])
         return models.Event(message_id=event['_id'],
-                            event_name=event['event_name'],
+                            event_type=event['event_type'],
                             generated=event['generated'], traits=traits)
 
     def get_events(self, event_filter):
@@ -1036,14 +1034,14 @@ class Connection(base.Connection):
         q = {'generated': {'$gte': event_filter.start,
                            '$lte': event_filter.end}}
 
-        if event_filter.event_name:
-            q['event_name'] = event_filter.event_name
+        if event_filter.event_type:
+            q['event_type'] = event_filter.event_type
 
         if event_filter.traits:
-            t_key = event_filter.traits.get('key', '*')
+            q['$and'] = q.get('$and', [])
             for key, value in event_filter.traits.iteritems():
                 if key != 'key':
-                    q['traits.%s' % t_key] = value
+                    q['$and'].append({'traits': {key: value}})
 
         events = self.db.event.find(q).sort('generated', pymongo.ASCENDING)
         return [self._to_event_model(x) for x in events]
