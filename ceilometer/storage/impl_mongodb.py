@@ -1040,8 +1040,7 @@ class Connection(base.Connection):
         if event_filter.traits:
             q['$and'] = q.get('$and', [])
             for key, value in event_filter.traits.iteritems():
-                if key != 'key':
-                    q['$and'].append({'traits': {key: value}})
+                q['$and'].append({'traits': {key: value}})
 
         events = self.db.event.find(q).sort('generated', pymongo.ASCENDING)
         return [self._to_event_model(x) for x in events]
