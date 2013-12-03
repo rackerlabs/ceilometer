@@ -1038,9 +1038,10 @@ class Connection(base.Connection):
             q['event_type'] = event_filter.event_type
 
         if event_filter.traits:
-            q['$and'] = q.get('$and', [])
+            t_key = event_filter.traits.get('key', '*')
             for key, value in event_filter.traits.iteritems():
-                q['$and'].append({'traits': {key: value}})
+                if key != 'key':
+                    q['traits.%s' % t_key] = value
 
         events = self.db.event.find(q).sort('generated', pymongo.ASCENDING)
         return [self._to_event_model(x) for x in events]
