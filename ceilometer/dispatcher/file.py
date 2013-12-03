@@ -21,7 +21,7 @@ import logging.handlers
 
 from oslo.config import cfg
 
-from ceilometer.collector import dispatcher
+from ceilometer import dispatcher
 
 file_dispatcher_opts = [
     cfg.StrOpt('file_path',
@@ -78,7 +78,7 @@ class FileDispatcher(dispatcher.Base):
             dispatcher_logger.addHandler(rfh)
             self.log = dispatcher_logger
 
-    def record_metering_data(self, context, data):
+    def record_metering_data(self, data):
         if self.log:
             self.log.info(data)
 

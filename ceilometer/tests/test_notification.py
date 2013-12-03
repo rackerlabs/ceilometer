@@ -15,27 +15,20 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
-"""Tests for ceilometer/agent/service.py
-"""
+"""Tests for Ceilometer notify daemon."""
 
 import datetime
-import socket
-
 import mock
-from mock import patch
-import msgpack
+
 from stevedore import extension
 from stevedore.tests import manager as test_manager
 
-from ceilometer.collector import service
 from ceilometer.compute import notifications
+from ceilometer import notification
 from ceilometer.openstack.common.fixture import config
-from ceilometer.openstack.common.fixture import moxstubout
 from ceilometer.openstack.common import timeutils
-from ceilometer import sample
 from ceilometer.storage import models
 from ceilometer.tests import base as tests_base
-
 
 TEST_NOTICE = {
     u'_context_auth_token': u'3d8b13de1b7d499587dfc69b77dc09c2',
@@ -87,129 +80,21 @@ TEST_NOTICE = {
 }
 
 
-class TestCollector(tests_base.BaseTestCase):
+class TestNotification(tests_base.BaseTestCase):
+
     def setUp(self):
-        super(TestCollector, self).setUp()
+        super(TestNotification, self).setUp()
+        self.srv = notification.NotificationService('the-host', 'the-topic')
         self.CONF = self.useFixture(config.Config()).conf
         self.CONF.set_override("connection", "log://", group='database')
 
-
-class TestUDPCollectorService(TestCollector):
-    def _make_fake_socket(self, family, type):
-        udp_socket = self.mox.CreateMockAnything()
-        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        udp_socket.bind((self.CONF.collector.udp_address,
-                         self.CONF.collector.udp_port))
-
-        def stop_udp(anything):
-            # Make the loop stop
-            self.srv.stop()
-
-        udp_socket.recvfrom(64 * 1024).WithSideEffects(
-            stop_udp).AndReturn(
-                (msgpack.dumps(self.counter),
-                 ('127.0.0.1', 12345)))
-
-        self.mox.ReplayAll()
-
-        return udp_socket
-
-    def setUp(self):
-        super(TestUDPCollectorService, self).setUp()
-        self.mox = self.useFixture(moxstubout.MoxStubout()).mox
-        self.srv = service.UDPCollectorService()
-        self.counter = sample.Sample(
-            name='foobar',
-            type='bad',
-            unit='F',
-            volume=1,
-            user_id='jd',
-            project_id='ceilometer',
-            resource_id='cat',
-            timestamp='NOW!',
-            resource_metadata={},
-        ).as_dict()
-
-    def test_udp_receive(self):
-        mock_dispatcher = mock.MagicMock()
-        self.srv.dispatcher_manager = test_manager.TestExtensionManager(
-            [extension.Extension('test',
-                                 None,
-                                 None,
-                                 mock_dispatcher
-                                 ),
-             ])
-        self.counter['source'] = 'mysource'
-        self.counter['counter_name'] = self.counter['name']
-        self.counter['counter_volume'] = self.counter['volume']
-        self.counter['counter_type'] = self.counter['type']
-        self.counter['counter_unit'] = self.counter['unit']
-
-        with patch('socket.socket', self._make_fake_socket):
-            self.srv.start()
-
-        mock_dispatcher.record_metering_data.assert_called_once_with(
-            self.counter)
-
-    def test_udp_receive_storage_error(self):
-        mock_dispatcher = mock.MagicMock()
-        self.srv.dispatcher_manager = test_manager.TestExtensionManager(
-            [extension.Extension('test',
-                                 None,
-                                 None,
-                                 mock_dispatcher
-                                 ),
-             ])
-        mock_dispatcher.record_metering_data.side_effect = self._raise_error
-
-        self.counter['source'] = 'mysource'
-        self.counter['counter_name'] = self.counter['name']
-        self.counter['counter_volume'] = self.counter['volume']
-        self.counter['counter_type'] = self.counter['type']
-        self.counter['counter_unit'] = self.counter['unit']
-
-        with patch('socket.socket', self._make_fake_socket):
-            self.srv.start()
-
-        mock_dispatcher.record_metering_data.assert_called_once_with(
-            self.counter)
-
-    @staticmethod
-    def _raise_error():
-        raise Exception
-
-    def test_udp_receive_bad_decoding(self):
-        with patch('socket.socket', self._make_fake_socket):
-            with patch('msgpack.loads', self._raise_error):
-                self.srv.start()
-
-
-class MyException(Exception):
-    pass
-
-
-class TestCollectorService(TestCollector):
-
-    def setUp(self):
-        super(TestCollectorService, self).setUp()
-        self.srv = service.CollectorService('the-host', 'the-topic')
-        self.ctx = None
-
-    @patch('ceilometer.pipeline.setup_pipeline', mock.MagicMock())
-    def test_init_host(self):
-        # If we try to create a real RPC connection, init_host() never
-        # returns. Mock it out so we can establish the service
-        # configuration.
-        with patch('ceilometer.openstack.common.rpc.create_connection'):
-            self.srv.start()
-
-    @patch('ceilometer.pipeline.setup_pipeline', mock.MagicMock())
+    @mock.patch('ceilometer.pipeline.setup_pipeline', mock.MagicMock())
     def test_process_notification(self):
         # If we try to create a real RPC connection, init_host() never
         # returns. Mock it out so we can establish the service
         # configuration.
-        self.CONF.set_override("store_events", False, group="collector")
-        with patch('ceilometer.openstack.common.rpc.create_connection'):
+        self.CONF.set_override("store_events", False, group="notification")
+        with mock.patch('ceilometer.openstack.common.rpc.create_connection'):
             self.srv.start()
         self.srv.pipeline_manager.pipelines[0] = mock.MagicMock()
         self.srv.notification_manager = test_manager.TestExtensionManager(
@@ -224,16 +109,18 @@ class TestCollectorService(TestCollector):
             self.srv.pipeline_manager.publisher.called)
 
     def test_process_notification_no_events(self):
-        self.CONF.set_override("store_events", False, group="collector")
+        self.CONF.set_override("store_events", False, group="notification")
         self.srv.notification_manager = mock.MagicMock()
-        with patch.object(self.srv, '_message_to_event') as fake_msg_to_event:
+        with mock.patch.object(self.srv,
+                               '_message_to_event') as fake_msg_to_event:
             self.srv.process_notification({})
             self.assertFalse(fake_msg_to_event.called)
 
     def test_process_notification_with_events(self):
-        self.CONF.set_override("store_events", True, group="collector")
+        self.CONF.set_override("store_events", True, group="notification")
         self.srv.notification_manager = mock.MagicMock()
-        with patch.object(self.srv, '_message_to_event') as fake_msg_to_event:
+        with mock.patch.object(self.srv,
+                               '_message_to_event') as fake_msg_to_event:
             self.srv.process_notification({})
             self.assertTrue(fake_msg_to_event.called)
 
@@ -253,18 +140,16 @@ class TestCollectorService(TestCollector):
                                  ),
              ])
 
-        with patch('ceilometer.collector.service.LOG') as mylog:
-            self.srv._message_to_event(message)
-            self.assertFalse(mylog.exception.called)
+        self.srv._message_to_event(message)
         events = mock_dispatcher.record_events.call_args[0]
         self.assertEqual(1, len(events))
         event = events[0]
-        self.assertEqual("foo", event.event_name)
+        self.assertEqual("foo", event.event_type)
         self.assertEqual(now, event.generated)
         self.assertEqual(1, len(event.traits))
 
     def test_message_to_event_duplicate(self):
-        self.CONF.set_override("store_events", True, group="collector")
+        self.CONF.set_override("store_events", True, group="notification")
         mock_dispatcher = mock.MagicMock()
         self.srv.dispatcher_manager = test_manager.TestExtensionManager(
             [extension.Extension('test',
@@ -279,7 +164,7 @@ class TestCollectorService(TestCollector):
         self.srv._message_to_event(message)  # Should return silently.
 
     def test_message_to_event_bad_event(self):
-        self.CONF.set_override("store_events", True, group="collector")
+        self.CONF.set_override("store_events", True, group="notification")
         mock_dispatcher = mock.MagicMock()
         self.srv.dispatcher_manager = test_manager.TestExtensionManager(
             [extension.Extension('test',
@@ -291,7 +176,7 @@ class TestCollectorService(TestCollector):
         mock_dispatcher.record_events.return_value = [
             (models.Event.UNKNOWN_PROBLEM, object())]
         message = {'event_type': "foo", 'message_id': "abc"}
-        self.assertRaises(service.UnableToSaveEventException,
+        self.assertRaises(notification.UnableToSaveEventException,
                           self.srv._message_to_event, message)
 
     def test_extract_when(self):
@@ -300,17 +185,17 @@ class TestCollectorService(TestCollector):
         timeutils.set_time_override(now)
 
         body = {"timestamp": str(modified)}
-        when = service.CollectorService._extract_when(body)
+        when = notification.NotificationService._extract_when(body)
         self.assertTimestampEqual(modified, when)
 
         body = {"_context_timestamp": str(modified)}
-        when = service.CollectorService._extract_when(body)
+        when = notification.NotificationService._extract_when(body)
         self.assertTimestampEqual(modified, when)
 
         then = now + datetime.timedelta(hours=1)
         body = {"timestamp": str(modified), "_context_timestamp": str(then)}
-        when = service.CollectorService._extract_when(body)
+        when = notification.NotificationService._extract_when(body)
         self.assertTimestampEqual(modified, when)
 
-        when = service.CollectorService._extract_when({})
+        when = notification.NotificationService._extract_when({})
         self.assertTimestampEqual(now, when)

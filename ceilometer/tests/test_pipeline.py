@@ -21,7 +21,7 @@ import datetime
 
 from stevedore import extension
 
-from ceilometer.openstack.common.fixture import moxstubout
+from ceilometer.openstack.common.fixture import mockpatch
 from ceilometer.openstack.common import test
 from ceilometer.openstack.common import timeutils
 from ceilometer import pipeline
@@ -149,16 +149,16 @@ class TestPipeline(test.BaseTestCase):
             resource_metadata={}
         )
 
-        self.stubs = self.useFixture(moxstubout.MoxStubout()).stubs
-        self.stubs.Set(transformer.TransformerExtensionManager,
-                       "__init__",
-                       self.fake_tem_init)
+        self.useFixture(mockpatch.PatchObject(
+            transformer.TransformerExtensionManager, "__init__",
+            side_effect=self.fake_tem_init))
 
-        self.stubs.Set(transformer.TransformerExtensionManager,
-                       "get_ext",
-                       self.fake_tem_get_ext)
+        self.useFixture(mockpatch.PatchObject(
+            transformer.TransformerExtensionManager, "get_ext",
+            side_effect=self.fake_tem_get_ext))
 
-        self.stubs.Set(publisher, 'get_publisher', self.get_publisher)
+        self.useFixture(mockpatch.PatchObject(
+            publisher, 'get_publisher', side_effect=self.get_publisher))
 
         self.transformer_manager = transformer.TransformerExtensionManager()
 
@@ -197,6 +197,11 @@ class TestPipeline(test.BaseTestCase):
 
     def test_no_publishers(self):
         del self.pipeline_cfg[0]['publishers']
+        self._exception_create_pipelinemanager()
+
+    def test_invalid_resources(self):
+        invalid_resource = {'invalid': 1}
+        self.pipeline_cfg[0]['resources'] = invalid_resource
         self._exception_create_pipelinemanager()
 
     def test_check_counters_include_exclude_same(self):
@@ -1048,3 +1053,17 @@ class TestPipeline(test.BaseTestCase):
         self.assertEqual(len(publisher.samples), 0)
         pipe.flush(None)
         self.assertEqual(len(publisher.samples), 0)
+
+    def test_resources(self):
+        resources = ['test1://', 'test2://']
+        self.pipeline_cfg[0]['resources'] = resources
+        pipeline_manager = pipeline.PipelineManager(self.pipeline_cfg,
+                                                    self.transformer_manager)
+        self.assertEqual(pipeline_manager.pipelines[0].resources,
+                         resources)
+
+    def test_no_resources(self):
+        pipeline_manager = pipeline.PipelineManager(self.pipeline_cfg,
+                                                    self.transformer_manager)
+        self.assertEqual(len(pipeline_manager.pipelines[0].resources),
+                         0)

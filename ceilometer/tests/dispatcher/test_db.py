@@ -15,16 +15,14 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
-"""Tests for ceilometer/collector/dispatcher/database.py
-"""
-from datetime import datetime
+import datetime
 
-from ceilometer.collector.dispatcher import database
+import mock
+
+from ceilometer.dispatcher import database
 from ceilometer.openstack.common.fixture import config
-from ceilometer.openstack.common.fixture import moxstubout
 from ceilometer.openstack.common import test
 from ceilometer.publisher import rpc
-from ceilometer.storage import base
 
 
 class TestDispatcherDB(test.BaseTestCase):
@@ -34,7 +32,6 @@ class TestDispatcherDB(test.BaseTestCase):
         self.CONF = self.useFixture(config.Config()).conf
         self.dispatcher = database.DatabaseDispatcher(self.CONF)
         self.ctx = None
-        self.mox = self.useFixture(moxstubout.MoxStubout()).mox
 
     def test_valid_message(self):
         msg = {'counter_name': 'test',
@@ -46,12 +43,11 @@ class TestDispatcherDB(test.BaseTestCase):
             self.CONF.publisher_rpc.metering_secret,
         )
 
-        self.dispatcher.storage_conn = self.mox.CreateMock(base.Connection)
-        self.dispatcher.storage_conn.record_metering_data(msg)
-        self.mox.ReplayAll()
+        with mock.patch.object(self.dispatcher.storage_conn,
+                               'record_metering_data') as record_metering_data:
+            self.dispatcher.record_metering_data(msg)
 
-        self.dispatcher.record_metering_data(self.ctx, msg)
-        self.mox.VerifyAll()
+        record_metering_data.assert_called_once_with(msg)
 
     def test_invalid_message(self):
         msg = {'counter_name': 'test',
@@ -69,7 +65,7 @@ class TestDispatcherDB(test.BaseTestCase):
 
         self.dispatcher.storage_conn = ErrorConnection()
 
-        self.dispatcher.record_metering_data(self.ctx, msg)
+        self.dispatcher.record_metering_data(msg)
 
         assert not self.dispatcher.storage_conn.called, \
             'Should not have called the storage connection'
@@ -85,15 +81,14 @@ class TestDispatcherDB(test.BaseTestCase):
             self.CONF.publisher_rpc.metering_secret,
         )
 
-        expected = {}
-        expected.update(msg)
-        expected['timestamp'] = datetime(2012, 7, 2, 13, 53, 40)
+        expected = msg.copy()
+        expected['timestamp'] = datetime.datetime(2012, 7, 2, 13, 53, 40)
 
-        self.dispatcher.storage_conn = self.mox.CreateMock(base.Connection)
-        self.dispatcher.storage_conn.record_metering_data(expected)
-        self.mox.ReplayAll()
+        with mock.patch.object(self.dispatcher.storage_conn,
+                               'record_metering_data') as record_metering_data:
+            self.dispatcher.record_metering_data(msg)
 
-        self.dispatcher.record_metering_data(self.ctx, msg)
+        record_metering_data.assert_called_once_with(expected)
 
     def test_timestamp_tzinfo_conversion(self):
         msg = {'counter_name': 'test',
@@ -106,12 +101,12 @@ class TestDispatcherDB(test.BaseTestCase):
             self.CONF.publisher_rpc.metering_secret,
         )
 
-        expected = {}
-        expected.update(msg)
-        expected['timestamp'] = datetime(2012, 9, 30, 23, 31, 50, 262000)
+        expected = msg.copy()
+        expected['timestamp'] = datetime.datetime(2012, 9, 30, 23,
+                                                  31, 50, 262000)
 
-        self.dispatcher.storage_conn = self.mox.CreateMock(base.Connection)
-        self.dispatcher.storage_conn.record_metering_data(expected)
-        self.mox.ReplayAll()
+        with mock.patch.object(self.dispatcher.storage_conn,
+                               'record_metering_data') as record_metering_data:
+            self.dispatcher.record_metering_data(msg)
 
-        self.dispatcher.record_metering_data(self.ctx, msg)
+        record_metering_data.assert_called_once_with(expected)

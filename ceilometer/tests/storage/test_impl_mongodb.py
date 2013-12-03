@@ -26,11 +26,11 @@
 
 import copy
 import datetime
+from mock import patch
 
 from ceilometer.publisher import rpc
 from ceilometer import sample
-from ceilometer.storage.base import MultipleResultsFound
-from ceilometer.storage.base import NoResultFound
+from ceilometer.storage import base
 from ceilometer.storage import impl_mongodb
 from ceilometer.tests import db as tests_db
 from ceilometer.tests.storage import test_storage_scenarios
@@ -80,7 +80,7 @@ class MongoDBTestMarkerBase(test_storage_scenarios.DBTestBase,
             ret = impl_mongodb.Connection._get_marker(self.conn.db.resource,
                                                       marker_pairs)
             self.assertEqual(ret['project_id'], 'project-id-foo')
-        except NoResultFound:
+        except base.NoResultFound:
             self.assertTrue(True)
 
     def test_get_marker_multiple(self):
@@ -89,7 +89,7 @@ class MongoDBTestMarkerBase(test_storage_scenarios.DBTestBase,
             ret = impl_mongodb.Connection._get_marker(self.conn.db.resource,
                                                       marker_pairs)
             self.assertEqual(ret['project_id'], 'project-id-foo')
-        except MultipleResultsFound:
+        except base.MultipleResultsFound:
             self.assertTrue(True)
 
 
@@ -160,32 +160,30 @@ class CompatibilityTest(test_storage_scenarios.DBTestBase,
 
             record = copy.copy(data)
             self.db.meter.insert(record)
-            return
 
         # Stubout with the old version DB schema, the one w/o 'counter_unit'
-        self.stubs.Set(self.conn,
-                       'record_metering_data',
-                       old_record_metering_data)
-        self.counters = []
-        c = sample.Sample(
-            'volume.size',
-            'gauge',
-            'GiB',
-            5,
-            'user-id',
-            'project1',
-            'resource-id',
-            timestamp=datetime.datetime(2012, 9, 25, 10, 30),
-            resource_metadata={'display_name': 'test-volume',
-                               'tag': 'self.counter',
-                               },
-            source='test',
-        )
-        self.counters.append(c)
-        msg = rpc.meter_message_from_counter(
-            c,
-            secret='not-so-secret')
-        self.conn.record_metering_data(self.conn, msg)
+        with patch.object(self.conn, 'record_metering_data',
+                          side_effect=old_record_metering_data):
+            self.counters = []
+            c = sample.Sample(
+                'volume.size',
+                'gauge',
+                'GiB',
+                5,
+                'user-id',
+                'project1',
+                'resource-id',
+                timestamp=datetime.datetime(2012, 9, 25, 10, 30),
+                resource_metadata={'display_name': 'test-volume',
+                                   'tag': 'self.counter',
+                                   },
+                source='test',
+            )
+            self.counters.append(c)
+            msg = rpc.meter_message_from_counter(
+                c,
+                secret='not-so-secret')
+            self.conn.record_metering_data(self.conn, msg)
 
         # Create the old format alarm with a dict instead of a
         # array for matching_metadata
@@ -280,7 +278,7 @@ class AlarmTestPagination(test_storage_scenarios.AlarmTestBase,
                                                       marker_pairs)
             self.assertEqual(ret['rule']['meter_name'],
                              'meter_name-foo')
-        except NoResultFound:
+        except base.NoResultFound:
             self.assertTrue(True)
 
     def test_alarm_get_marker_multiple(self):
@@ -291,5 +289,5 @@ class AlarmTestPagination(test_storage_scenarios.AlarmTestBase,
                                                       marker_pairs)
             self.assertEqual(ret['rule']['meter_name'],
                              'counter-name-foo')
-        except MultipleResultsFound:
+        except base.MultipleResultsFound:
             self.assertTrue(True)

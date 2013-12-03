@@ -23,7 +23,7 @@ import urlparse
 
 from oslo.config import cfg
 from sqlalchemy import Column, Integer, String, Table, ForeignKey, DateTime, \
-    Index, UniqueConstraint
+    Index, UniqueConstraint, BigInteger
 from sqlalchemy import Float, Boolean, Text
 from sqlalchemy.dialects.mysql import DECIMAL
 from sqlalchemy.ext.declarative import declarative_base
@@ -165,7 +165,7 @@ class MetaBool(Base):
     value = Column(Boolean)
 
 
-class MetaInt(Base):
+class MetaBigInt(Base):
     """Metering integer metadata."""
 
     __tablename__ = 'metadata_int'
@@ -174,7 +174,7 @@ class MetaInt(Base):
     )
     id = Column(Integer, ForeignKey('meter.id'), primary_key=True)
     meta_key = Column(String(255), primary_key=True)
-    value = Column(Integer, default=False)
+    value = Column(BigInteger, default=False)
 
 
 class MetaFloat(Base):
@@ -307,29 +307,44 @@ class UniqueName(Base):
         return "<UniqueName: %s>" % self.key
 
 
+class EventType(Base):
+    """Types of event records."""
+    __tablename__ = 'event_type'
+
+    id = Column(Integer, primary_key=True)
+    desc = Column(String(255), unique=True)
+
+    def __init__(self, event_type):
+        self.desc = event_type
+
+    def __repr__(self):
+        return "<EventType: %s>" % self.desc
+
+
 class Event(Base):
     __tablename__ = 'event'
     __table_args__ = (
-        Index('unique_name_id', 'unique_name_id'),
         Index('ix_event_message_id', 'message_id'),
-        Index('ix_event_generated', 'generated'),
+        Index('ix_event_type_id', 'event_type_id'),
+        Index('ix_event_generated', 'generated')
     )
     id = Column(Integer, primary_key=True)
     message_id = Column(String(50), unique=True)
     generated = Column(Float(asdecimal=True))
 
-    unique_name_id = Column(Integer, ForeignKey('unique_name.id'))
-    unique_name = relationship("UniqueName", backref=backref('unique_name',
-                               order_by=id))
+    event_type_id = Column(Integer, ForeignKey('event_type.id'))
+    event_type = relationship("EventType", backref=backref('event_type'))
 
-    def __init__(self, message_id, event, generated):
+    def __init__(self, message_id, event_type, generated):
         self.message_id = message_id
-        self.unique_name = event
+        self.event_type = event_type
         self.generated = generated
 
     def __repr__(self):
-        return "<Event %d('Event: %s %s, Generated: %s')>" % \
-               (self.id, self.message_id, self.unique_name, self.generated)
+        return "<Event %d('Event: %s %s, Generated: %s')>" % (self.id,
+                                                              self.message_id,
+                                                              self.event_type,
+                                                              self.generated)
 
 
 class Trait(Base):

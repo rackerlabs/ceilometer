@@ -18,31 +18,32 @@
 
 import uuid
 
-from ceilometerclient.v2.alarms import Alarm as AlarmClient
+from ceilometerclient.v2 import alarms
 import mock
 
 from ceilometer.alarm import rpc as rpc_alarm
 from ceilometer.openstack.common.fixture import config
-from ceilometer.openstack.common.fixture import moxstubout
+from ceilometer.openstack.common.fixture import mockpatch
 from ceilometer.openstack.common import rpc
 from ceilometer.openstack.common import test
 from ceilometer.openstack.common import timeutils
-from ceilometer.storage.models import Alarm as AlarmModel
+from ceilometer.storage import models
 
 
 class TestRPCAlarmNotifier(test.BaseTestCase):
-    def faux_cast(self, context, topic, msg):
+    def fake_cast(self, context, topic, msg):
         self.notified.append((topic, msg))
         self.CONF = self.useFixture(config.Config()).conf
 
     def setUp(self):
         super(TestRPCAlarmNotifier, self).setUp()
         self.notified = []
-        self.stubs = self.useFixture(moxstubout.MoxStubout()).stubs
-        self.stubs.Set(rpc, 'cast', self.faux_cast)
+        self.useFixture(mockpatch.PatchObject(
+            rpc, 'cast',
+            side_effect=self.fake_cast))
         self.notifier = rpc_alarm.RPCAlarmNotifier()
         self.alarms = [
-            AlarmClient(None, info={
+            alarms.Alarm(None, info={
                 'name': 'instance_running_hot',
                 'meter_name': 'cpu_util',
                 'comparison_operator': 'gt',
@@ -58,7 +59,7 @@ class TestRPCAlarmNotifier(test.BaseTestCase):
                 'matching_metadata':{'resource_id':
                                      'my_instance'}
             }),
-            AlarmClient(None, info={
+            alarms.Alarm(None, info={
                 'name': 'group_running_idle',
                 'meter_name': 'cpu_util',
                 'comparison_operator': 'le',
@@ -82,7 +83,7 @@ class TestRPCAlarmNotifier(test.BaseTestCase):
             self.notifier.notify(a, previous[i], "what? %d" % i)
         self.assertEqual(len(self.notified), 2)
         for i, a in enumerate(self.alarms):
-            actions = getattr(a, AlarmModel.ALARM_ACTIONS_MAP[a.state])
+            actions = getattr(a, models.Alarm.ALARM_ACTIONS_MAP[a.state])
             self.assertEqual(self.notified[i][0],
                              self.CONF.alarm.notifier_rpc_topic)
             self.assertEqual(self.notified[i][1]["args"]["data"]["alarm_id"],
@@ -102,7 +103,7 @@ class TestRPCAlarmNotifier(test.BaseTestCase):
         self.assertTrue(isinstance(reason, basestring))
 
     def test_notify_no_actions(self):
-        alarm = AlarmClient(None, info={
+        alarm = alarms.Alarm(None, info={
             'name': 'instance_running_hot',
             'meter_name': 'cpu_util',
             'comparison_operator': 'gt',
@@ -123,14 +124,15 @@ class TestRPCAlarmNotifier(test.BaseTestCase):
 
 
 class TestRPCAlarmPartitionCoordination(test.BaseTestCase):
-    def faux_fanout_cast(self, context, topic, msg):
+    def fake_fanout_cast(self, context, topic, msg):
         self.notified.append((topic, msg))
 
     def setUp(self):
         super(TestRPCAlarmPartitionCoordination, self).setUp()
         self.notified = []
-        self.stubs = self.useFixture(moxstubout.MoxStubout()).stubs
-        self.stubs.Set(rpc, 'fanout_cast', self.faux_fanout_cast)
+        self.useFixture(mockpatch.PatchObject(
+            rpc, 'fanout_cast',
+            side_effect=self.fake_fanout_cast))
         self.ordination = rpc_alarm.RPCAlarmPartitionCoordination()
         self.alarms = [mock.MagicMock(), mock.MagicMock()]
 

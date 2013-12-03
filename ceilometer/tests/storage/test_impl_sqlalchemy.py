@@ -30,7 +30,6 @@ from mock import patch
 
 from ceilometer.storage import models
 from ceilometer.storage.sqlalchemy import models as sql_models
-from ceilometer.storage.sqlalchemy.models import table_args
 from ceilometer.tests import db as tests_db
 from ceilometer import utils
 
@@ -67,6 +66,27 @@ class UniqueNameTest(EventTestBase):
         self.assertNotEqual(u1.key, u2.key)
         # Test the method __repr__ returns a string
         self.assertTrue(repr.repr(u2))
+
+
+class EventTypeTest(EventTestBase):
+    # EventType is a construct specific to sqlalchemy
+    # Not applicable to other drivers.
+
+    def test_event_type_exists(self):
+        et1 = self.conn._get_or_create_event_type("foo")
+        self.assertTrue(et1.id >= 0)
+        et2 = self.conn._get_or_create_event_type("foo")
+        self.assertEqual(et1.id, et2.id)
+        self.assertEqual(et1.desc, et2.desc)
+
+    def test_event_type_unique(self):
+        et1 = self.conn._get_or_create_event_type("foo")
+        self.assertTrue(et1.id >= 0)
+        et2 = self.conn._get_or_create_event_type("blah")
+        self.assertNotEqual(et1.id, et2.id)
+        self.assertNotEqual(et1.desc, et2.desc)
+        # Test the method __repr__ returns a string
+        self.assertTrue(repr.repr(et2))
 
 
 class MyException(Exception):
@@ -142,4 +162,4 @@ class ModelTest(tests_db.TestBase):
     database_connection = 'mysql://localhost'
 
     def test_model_table_args(self):
-        self.assertIsNotNone(table_args())
+        self.assertIsNotNone(sql_models.table_args())
