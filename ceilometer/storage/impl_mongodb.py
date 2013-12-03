@@ -29,6 +29,7 @@ import weakref
 import bson.code
 import bson.objectid
 import pymongo
+import pymongo.errors
 
 from oslo.config import cfg
 
@@ -67,6 +68,14 @@ class MongoDBStorage(base.StorageEngine):
               project_id: uuid
               meter: [ array of {counter_name: string, counter_type: string,
                                  counter_unit: string} ]
+            }
+        - event
+          - a record of received notifications and their traits
+          - { _id: message_id of the event,
+              event_name: the name of the given event,
+              generated: the datetime the given event was generated,
+              traits: dict of key/value pairs, values can be:
+                      strings, ints, floats, datetimes
             }
     """
 
@@ -348,6 +357,12 @@ class Connection(base.Connection):
             ], name='meter_idx')
         self.db.meter.ensure_index([('timestamp', pymongo.DESCENDING)],
                                    name='timestamp_idx')
+
+        self.db.event.ensure_index([('generated', pymongo.ASCENDING),
+                                    ('event_type', pymongo.ASCENDING)],
+                                   name='event_type_idx')
+
+        self.db.event.ensure_index('traits', name='event_traits_idx')
 
         indexes = self.db.meter.index_information()
 
@@ -959,18 +974,74 @@ class Connection(base.Connection):
         """
         self.db.alarm_history.insert(alarm_change)
 
-    @staticmethod
-    def record_events(events):
+    def record_events(self, events):
         """Write the events.
 
         :param events: a list of model.Event objects.
         """
-        raise NotImplementedError('Events not implemented.')
+        problem_events = []
+        for event in events:
+            record = {
+                '_id': event.message_id,
+                'event_type': event.event_type,
+                'generated': event.generated,
+                'traits': [{trait.name: trait.value}
+                           for trait in event.traits or []],
+            }
+
+            try:
+                self.db.event.insert(record)
+
+                # Set id for testing purposes
+                event.id = record['_id']
+                for trait in event.traits or []:
+                    trait.id = trait.name
+            except pymongo.errors.DuplicateKeyError:
+                problem_events.append((models.Event.DUPLICATE, event))
+            except Exception as e:
+                LOG.exception('Failed to record event: %s', e)
+                problem_events.append((models.Event.UNKNOWN_PROBLEM, event))
+        return problem_events
 
     @staticmethod
-    def get_events(event_filter):
+    def _get_trait_type(value):
+        for dtype, trait_type in models.Trait.TRAIT_TYPE_MAPPING.iteritems():
+            if isinstance(value, dtype):
+                return trait_type
+        return models.Trait.TEXT_TYPE
+
+    @classmethod
+    def _to_trait_models(cls, traits):
+        t_models = []
+        for key, value in enumerate(traits):
+            dtype = cls._get_trait_type(value)
+            t_models.append(models.Trait(name=key, value=value,
+                                         dtype=dtype))
+        return t_models
+
+    @classmethod
+    def _to_event_model(cls, event):
+        traits = cls._to_trait_models(event['traits'])
+        return models.Event(message_id=event['_id'],
+                            event_type=event['event_type'],
+                            generated=event['generated'], traits=traits)
+
+    def get_events(self, event_filter):
         """Return an iterable of model.Event objects.
 
         :param event_filter: EventFilter instance
         """
-        raise NotImplementedError('Events not implemented.')
+        q = {'generated': {'$gte': event_filter.start,
+                           '$lte': event_filter.end}}
+
+        if event_filter.event_type:
+            q['event_type'] = event_filter.event_type
+
+        if event_filter.traits:
+            t_key = event_filter.traits.get('key', '*')
+            for key, value in event_filter.traits.iteritems():
+                if key != 'key':
+                    q['traits.%s' % t_key] = value
+
+        events = self.db.event.find(q).sort('generated', pymongo.ASCENDING)
+        return [self._to_event_model(x) for x in events]

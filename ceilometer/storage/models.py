@@ -15,6 +15,9 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
+import datetime
+
+
 """Model classes for use in the storage API.
 """
 
@@ -87,6 +90,13 @@ class Trait(Model):
     INT_TYPE = 2
     FLOAT_TYPE = 3
     DATETIME_TYPE = 4
+
+    TRAIT_TYPE_MAPPING = {
+        basestring: TEXT_TYPE,
+        int: INT_TYPE,
+        float: FLOAT_TYPE,
+        datetime.datetime: DATETIME_TYPE
+    }
 
     def __init__(self, name, dtype, value):
         Model.__init__(self, name=name, dtype=dtype, value=value)
