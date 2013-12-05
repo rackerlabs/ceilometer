@@ -45,7 +45,7 @@ def upgrade(migrate_engine):
         Column('alarm_actions', Text()),
         Column('insufficient_data_actions', Text()),
         Column('matching_metadata', Text()),
-        mysql_engine='InnoDB',
+        mysql_engine='MyISAM',
         mysql_charset='utf8')
     alarm.create()
 

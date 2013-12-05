@@ -52,7 +52,7 @@ def upgrade(migrate_engine):
         }
         table.update().where(table.c.id == row.id).values(rule=rule).execute()
 
-    index = Index('ix_alarm_counter_name', table.c.meter_name)
+    index = Index('ix_alarm_counter_name', table.c.meter_name, mysql_length=50)
     index.drop(bind=migrate_engine)
     table.c.meter_name.drop()
     table.c.comparison_operator.drop()
@@ -102,7 +102,7 @@ def downgrade(migrate_engine):
             table.update().where(table.c.id == row.id
                                  ).values(**values).execute()
 
-    index = Index('ix_alarm_counter_name', table.c.meter_name)
+    index = Index('ix_alarm_counter_name', table.c.meter_name, mysql_length=50)
     index.create(bind=migrate_engine)
 
     table.c.type.drop()

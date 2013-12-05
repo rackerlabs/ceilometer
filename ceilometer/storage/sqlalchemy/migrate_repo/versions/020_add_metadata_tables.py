@@ -44,7 +44,7 @@ def upgrade(migrate_engine):
             Column('id', Integer, ForeignKey('meter.id'), primary_key=True),
             Column('meta_key', String(255), index=True, primary_key=True),
             Column('value', t_type, nullable=t_nullable),
-            mysql_engine='InnoDB',
+            mysql_engine='MyISAM',
             mysql_charset='utf8',
         )
         meta_tables[t_name].create()

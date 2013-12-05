@@ -28,7 +28,7 @@ def upgrade(migrate_engine):
         'unique_name', meta,
         Column('id', Integer, primary_key=True),
         Column('key', String(32), index=True),
-        mysql_engine='InnoDB',
+        mysql_engine='MyISAM',
         mysql_charset='utf8',
     )
     unique_name.create()
@@ -38,7 +38,7 @@ def upgrade(migrate_engine):
         Column('id', Integer, primary_key=True),
         Column('generated', Float(asdecimal=True), index=True),
         Column('unique_name_id', Integer, ForeignKey('unique_name.id')),
-        mysql_engine='InnoDB',
+        mysql_engine='MyISAM',
         mysql_charset='utf8',
     )
     event.create()
@@ -55,7 +55,7 @@ def upgrade(migrate_engine):
         Column('t_datetime', Float(asdecimal=True), nullable=True,
                default=None, index=True),
         Column('event_id', Integer, ForeignKey('event.id')),
-        mysql_engine='InnoDB',
+        mysql_engine='MyISAM',
         mysql_charset='utf8',
     )
     trait.create()

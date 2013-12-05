@@ -37,7 +37,7 @@ from ceilometer import utils
 
 sql_opts = [
     cfg.StrOpt('mysql_engine',
-               default='InnoDB',
+               default='MyISAM',
                help='MySQL engine')
 ]
 
@@ -47,7 +47,7 @@ cfg.CONF.register_opts(sql_opts)
 def table_args():
     engine_name = urlparse.urlparse(cfg.CONF.database.connection).scheme
     if engine_name == 'mysql':
-        return {'mysql_engine': cfg.CONF.mysql_engine,
+        return {'mysql_engine': 'MyISAM',
                 'mysql_charset': "utf8"}
     return None
 

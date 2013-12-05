@@ -20,11 +20,11 @@ from ceilometer.storage.sqlalchemy.models import Meter
 
 def upgrade(migrate_engine):
     index = Index('idx_meter_rid_cname', Meter.resource_id,
-                  Meter.counter_name)
+                  Meter.counter_name, mysql_length=50)
     index.create(bind=migrate_engine)
 
 
 def downgrade(migrate_engine):
     index = Index('idx_meter_rid_cname', Meter.resource_id,
-                  Meter.counter_name)
+                  Meter.counter_name, mysql_length=50)
     index.drop(bind=migrate_engine)
