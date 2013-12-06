@@ -2167,7 +2167,8 @@ class GetEventTest(EventTestBase):
             now = now + datetime.timedelta(hours=1)
         self.end = now
 
-        self.conn.record_events(self.event_models)
+        prob = self.conn.record_events(self.event_models)
+        self.assertEqual(0, len(prob), prob)
 
     def test_generated_is_datetime(self):
         event_filter = storage.EventFilter(self.start, self.end)

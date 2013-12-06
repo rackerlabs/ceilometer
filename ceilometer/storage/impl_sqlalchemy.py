@@ -18,11 +18,13 @@
 """SQLAlchemy storage backend."""
 
 from __future__ import absolute_import
+import collections
 import datetime
 import operator
 import os
 import types
 
+from oslo.config import cfg
 from sqlalchemy import and_
 from sqlalchemy import desc
 from sqlalchemy import func
@@ -38,6 +40,14 @@ from ceilometer.storage import models as api_models
 from ceilometer.storage.sqlalchemy import migration
 from ceilometer.storage.sqlalchemy import models
 from ceilometer import utils
+
+SQLALCHEMY_OPTS = [
+    cfg.IntOpt('unique_name_cache_size',
+               default=500,
+               help="""Max size of the unique name cache"""),
+]
+
+cfg.CONF.register_opts(SQLALCHEMY_OPTS, group='database')
 
 LOG = log.getLogger(__name__)
 
@@ -165,10 +175,46 @@ def make_query_from_filter(session, query, sample_filter, require_meter=True):
     return query
 
 
+class LRUCache(object):
+    def __init__(self, max_size=200):
+        self.items = collections.OrderedDict()
+        self.max_size = max_size
+
+    def get(self, key):
+        item = self.items[key]
+        del self.items[key]
+        self.items[key] = item
+        return item
+
+    def set(self, key, value):
+        if key in self.items:
+            del self.items[key]
+        if len(self.items) >= self.max_size:
+            self.items.popitem(last=False)
+        self.items[key] = value
+
+    def clear(self):
+        self.items = collections.OrderedDict()
+
+    def __iter__(self):
+        return self.items.keys().__iter__()
+
+    def __contains__(self, item):
+        return item in self.items
+
+    def __len__(self):
+        return len(self.items)
+
+    def __repr__(self):
+        return self.items.__repr__()
+
+
 class Connection(base.Connection):
     """SqlAlchemy connection."""
 
     def __init__(self, conf):
+        name_cache_size = conf.database.unique_name_cache_size
+        self.name_cache = LRUCache(max_size=name_cache_size)
         url = conf.database.connection
         if url == 'sqlite://':
             conf.database.connection = \
@@ -183,6 +229,7 @@ class Connection(base.Connection):
         engine = session.get_bind()
         for table in reversed(models.Base.metadata.sorted_tables):
             engine.execute(table.delete())
+        self.name_cache.clear()
 
     @staticmethod
     def _create_or_update(session, model_class, _id, source=None, **kwargs):
@@ -838,73 +885,86 @@ class Connection(base.Connection):
             alarm_change_row.update(alarm_change)
             session.add(alarm_change_row)
 
-    @staticmethod
-    def _get_or_create_trait_type(trait_type, data_type, session=None):
+    def _get_or_create_trait_type(self, trait_type, data_type, session=None):
         """Find if this trait already exists in the database, and
         if it does not, create a new entry in the trait type table.
         """
-        if session is None:
-            session = sqlalchemy_session.get_session()
-        with session.begin(subtransactions=True):
-            tt = session.query(models.TraitType).filter(
-                models.TraitType.desc == trait_type,
-                models.TraitType.data_type == data_type).first()
-            if not tt:
-                tt = models.TraitType(trait_type, data_type)
-                session.add(tt)
-        return tt
+        cache_key = str((trait_type, data_type))
+        if cache_key in self.name_cache:
+            return self.name_cache.get(cache_key)
+        else:
+            if session is None:
+                session = sqlalchemy_session.get_session()
+            with session.begin(subtransactions=True):
+                tt = session.query(models.TraitType).filter(
+                    models.TraitType.desc == trait_type,
+                    models.TraitType.data_type == data_type).first()
+                if not tt:
+                    tt = models.TraitType(trait_type, data_type)
+                    session.add(tt)
+                    session.flush()
+                self.name_cache.set(cache_key, tt)
+            return tt
 
-    @classmethod
-    def _make_trait(cls, trait_model, event, session=None):
+    def _make_trait(self, trait_model, event, session=None):
         """Make a new Trait from a Trait model.
 
         Doesn't flush or add to session.
         """
-        trait_type = cls._get_or_create_trait_type(trait_model.name,
-                                                   trait_model.dtype,
-                                                   session)
+        trait_type = self._get_or_create_trait_type(trait_model.name,
+                                                    trait_model.dtype,
+                                                    session)
         value_map = models.Trait._value_map
-        values = {'t_string': None, 't_float': None,
+        fields = {'t_string': None, 't_float': None,
                   't_int': None, 't_datetime': None}
         value = trait_model.value
-        values[value_map[trait_model.dtype]] = value
-        return models.Trait(trait_type, event, **values)
+        if trait_model.dtype == api_models.Trait.DATETIME_TYPE:
+            value = utils.dt_to_decimal(value)
+        fields[value_map[trait_model.dtype]] = value
+        fields['trait_type_id'] = trait_type.id
+        fields['event_id'] = event.id
+        fields['trait_type'] = trait_model.dtype
+        return fields
 
-    @staticmethod
-    def _get_or_create_event_type(event_type, session=None):
+    def _get_or_create_event_type(self, event_type, session=None):
         """Here, we check to see if an event type with the supplied
         name already exists. If not, we create it and return the record.
 
         This may result in a flush.
         """
-        if session is None:
-            session = sqlalchemy_session.get_session()
-        with session.begin(subtransactions=True):
-            et = session.query(models.EventType).filter(
-                models.EventType.desc == event_type).first()
-            if not et:
-                et = models.EventType(event_type)
-                session.add(et)
-        return et
+        if event_type in self.name_cache:
+            return self.name_cache.get(event_type)
+        else:
+            if session is None:
+                session = sqlalchemy_session.get_session()
+            with session.begin(subtransactions=True):
+                et = session.query(models.EventType).filter(
+                    models.EventType.desc == event_type).first()
+                if not et:
+                    et = models.EventType(event_type)
+                    session.add(et)
+                    session.flush()
+                self.name_cache.set(event_type, et)
+            return et
 
-    @classmethod
-    def _record_event(cls, session, event_model):
+    def _record_event(self, session, event_model):
         """Store a single Event, including related Traits.
         """
         with session.begin(subtransactions=True):
-            event_type = cls._get_or_create_event_type(event_model.event_type,
-                                                       session=session)
-
-            event = models.Event(event_model.message_id, event_type,
-                                 event_model.generated)
+            event_type = self._get_or_create_event_type(event_model.event_type,
+                                                        session=session)
+            generated = utils.dt_to_decimal(event_model.generated)
+            event = models.Event(event_model.message_id, event_type, generated)
             session.add(event)
-
+            # NOTE(apmelton) We need to flush to get the event's ID so that we
+            # can bulk insert the traits.
+            session.flush()
             new_traits = []
             if event_model.traits:
                 for trait in event_model.traits:
-                    t = cls._make_trait(trait, event, session=session)
-                    session.add(t)
+                    t = self._make_trait(trait, event, session=session)
                     new_traits.append(t)
+                session.execute(models.Trait.__table__.insert(), new_traits)
 
         # Note: we don't flush here, explicitly (unless a new trait or event
         # does it). Otherwise, just wait until all the Events are staged.
@@ -918,18 +978,14 @@ class Connection(base.Connection):
         Returns a list of events that could not be saved in a
         (reason, event) tuple. Reasons are enumerated in
         storage.model.Event
-
-        Flush when they're all added, unless new EventTypes or
-        TraitTypes are added along the way.
         """
         session = sqlalchemy_session.get_session()
-        events = []
         problem_events = []
         for event_model in event_models:
-            event = None
             try:
                 with session.begin():
-                    event = self._record_event(session, event_model)
+                    self._record_event(session, event_model)
+                    session.flush()
             except dbexc.DBDuplicateEntry:
                 problem_events.append((api_models.Event.DUPLICATE,
                                        event_model))
@@ -937,7 +993,6 @@ class Connection(base.Connection):
                 LOG.exception(_('Failed to record event: %s') % e)
                 problem_events.append((api_models.Event.UNKNOWN_PROBLEM,
                                        event_model))
-            events.append(event)
         return problem_events
 
     def get_events(self, event_filter):
