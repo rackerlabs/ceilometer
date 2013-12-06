@@ -86,6 +86,7 @@ class Trait(Model):
     record of basic data types (int, date, float, etc).
     """
 
+    NONE_TYPE = 0
     TEXT_TYPE = 1
     INT_TYPE = 2
     FLOAT_TYPE = 3
@@ -99,6 +100,8 @@ class Trait(Model):
     }
 
     def __init__(self, name, dtype, value):
+        if not dtype:
+            dtype = Trait.NONE_TYPE
         Model.__init__(self, name=name, dtype=dtype, value=value)
 
     def __repr__(self):

@@ -702,7 +702,6 @@ class Connection(base.Connection):
             alarm_row = models.Alarm(id=alarm.alarm_id)
             alarm_row.update(alarm.as_dict())
             session.add(alarm_row)
-            session.flush()
 
         return self._row_to_alarm_model(alarm_row)
 
@@ -715,7 +714,6 @@ class Connection(base.Connection):
         with session.begin():
             alarm_row = session.merge(models.Alarm(id=alarm.alarm_id))
             alarm_row.update(alarm.as_dict())
-            session.flush()
 
         return self._row_to_alarm_model(alarm_row)
 
@@ -729,7 +727,6 @@ class Connection(base.Connection):
         with session.begin():
             session.query(models.Alarm).filter(
                 models.Alarm.id == alarm_id).delete()
-            session.flush()
 
     @staticmethod
     def _row_to_alarm_change_model(row):
@@ -815,36 +812,32 @@ class Connection(base.Connection):
                 event_id=alarm_change['event_id'])
             alarm_change_row.update(alarm_change)
             session.add(alarm_change_row)
-            session.flush()
 
     @staticmethod
-    def _get_unique(session, key):
-        return session.query(models.UniqueName)\
-            .filter(models.UniqueName.key == key).first()
-
-    def _get_or_create_unique_name(self, key, session=None):
-        """Find the UniqueName entry for a given key, creating
-           one if necessary.
-
-           This may result in a flush.
+    def _get_or_create_trait_type(trait_type, data_type, session=None):
+        """Find if this trait already exists in the database, and
+        if it does not, create a new entry in the trait type table.
         """
         if session is None:
             session = sqlalchemy_session.get_session()
         with session.begin(subtransactions=True):
-            unique = self._get_unique(session, key)
-            if not unique:
-                unique = models.UniqueName(key=key)
-                session.add(unique)
-                session.flush()
-        return unique
+            tt = session.query(models.TraitType).filter(
+                models.TraitType.desc == trait_type,
+                models.TraitType.data_type == data_type).first()
+            if not tt:
+                tt = models.TraitType(trait_type, data_type)
+                session.add(tt)
+        return tt
 
-    def _make_trait(self, trait_model, event, session=None):
+    @classmethod
+    def _make_trait(cls, trait_model, event, session=None):
         """Make a new Trait from a Trait model.
 
         Doesn't flush or add to session.
         """
-        name = self._get_or_create_unique_name(trait_model.name,
-                                               session=session)
+        trait_type = cls._get_or_create_trait_type(trait_model.name,
+                                                   trait_model.dtype,
+                                                   session)
         value_map = models.Trait._value_map
         values = {'t_string': None, 't_float': None,
                   't_int': None, 't_datetime': None}
@@ -852,7 +845,7 @@ class Connection(base.Connection):
         if trait_model.dtype == api_models.Trait.DATETIME_TYPE:
             value = utils.dt_to_decimal(value)
         values[value_map[trait_model.dtype]] = value
-        return models.Trait(name, event, trait_model.dtype, **values)
+        return models.Trait(trait_type, event, **values)
 
     @staticmethod
     def _get_or_create_event_type(event_type, session=None):
@@ -869,15 +862,15 @@ class Connection(base.Connection):
             if not et:
                 et = models.EventType(event_type)
                 session.add(et)
-                session.flush()
         return et
 
-    def _record_event(self, session, event_model):
+    @classmethod
+    def _record_event(cls, session, event_model):
         """Store a single Event, including related Traits.
         """
         with session.begin(subtransactions=True):
-            event_type = self._get_or_create_event_type(event_model.event_type,
-                                                        session=session)
+            event_type = cls._get_or_create_event_type(event_model.event_type,
+                                                       session=session)
 
             generated = utils.dt_to_decimal(event_model.generated)
             event = models.Event(event_model.message_id, event_type, generated)
@@ -886,11 +879,11 @@ class Connection(base.Connection):
             new_traits = []
             if event_model.traits:
                 for trait in event_model.traits:
-                    t = self._make_trait(trait, event, session=session)
+                    t = cls._make_trait(trait, event, session=session)
                     session.add(t)
                     new_traits.append(t)
 
-        # Note: we don't flush here, explicitly (unless a new event_type
+        # Note: we don't flush here, explicitly (unless a new trait or event
         # does it). Otherwise, just wait until all the Events are staged.
         return (event, new_traits)
 
@@ -902,6 +895,9 @@ class Connection(base.Connection):
         Returns a list of events that could not be saved in a
         (reason, event) tuple. Reasons are enumerated in
         storage.model.Event
+
+        Flush when they're all added, unless new EventTypes or
+        TraitTypes are added along the way.
         """
         session = sqlalchemy_session.get_session()
         events = []
@@ -911,7 +907,6 @@ class Connection(base.Connection):
             try:
                 with session.begin():
                     event = self._record_event(session, event_model)
-                    session.flush()
             except dbexc.DBDuplicateEntry:
                 problem_events.append((api_models.Event.DUPLICATE,
                                        event_model))
@@ -949,10 +944,13 @@ class Connection(base.Connection):
 
             event_models_dict = {}
             if event_filter.traits:
+                sub_query = sub_query.join(models.TraitType,
+                                           models.TraitType.id ==
+                                           models.Trait.trait_type_id)
                 for key, value in event_filter.traits.iteritems():
                     if key == 'key':
-                        key = self._get_unique(session, value)
-                        sub_query = sub_query.filter(models.Trait.name == key)
+                        sub_query = sub_query.filter(models.TraitType.desc ==
+                                                     value)
                     elif key == 't_string':
                         sub_query = sub_query.filter(
                             models.Trait.t_string == value)
@@ -1000,7 +998,8 @@ class Connection(base.Connection):
                                              generated, [])
                     event_models_dict[trait.event_id] = event
                 value = trait.get_value()
-                trait_model = api_models.Trait(trait.name.key, trait.t_type,
+                trait_model = api_models.Trait(trait.trait_type.desc,
+                                               trait.trait_type.data_type,
                                                value)
                 event.append_trait(trait_model)
 
