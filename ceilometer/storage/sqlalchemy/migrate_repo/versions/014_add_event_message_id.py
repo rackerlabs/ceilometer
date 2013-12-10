@@ -29,7 +29,8 @@ def upgrade(migrate_engine):
     cons = UniqueConstraint('message_id', table=event)
     cons.create()
 
-    index = sqlalchemy.Index('idx_event_message_id', models.Event.message_id)
+    index = sqlalchemy.Index('idx_event_message_id', models.Event.message_id,
+                             mysql_length=50)
     index.create(bind=migrate_engine)
 
     # Populate the new column ...
@@ -55,6 +56,7 @@ def downgrade(migrate_engine):
     message_id = sqlalchemy.Column('message_id', sqlalchemy.String(50))
     cons = UniqueConstraint('message_id', table=event)
     cons.drop()
-    index = sqlalchemy.Index('idx_event_message_id', models.Event.message_id)
+    index = sqlalchemy.Index('idx_event_message_id', models.Event.message_id,
+                             mysql_length=50)
     index.drop(bind=migrate_engine)
     event.drop_column(message_id)

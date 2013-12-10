@@ -34,7 +34,7 @@ def upgrade(migrate_engine):
     for table_name, indexes in INDEXES.items():
         table = load_tables[table_name]
         for index_name, column in indexes:
-            index = Index(index_name, table.c[column])
+            index = Index(index_name, table.c[column], mysql_length=50)
             index.drop()
 
 
@@ -45,5 +45,5 @@ def downgrade(migrate_engine):
     for table_name, indexes in INDEXES.items():
         table = load_tables[table_name]
         for index_name, column in indexes:
-            index = Index(index_name, table.c[column])
+            index = Index(index_name, table.c[column], mysql_length=50)
             index.create()

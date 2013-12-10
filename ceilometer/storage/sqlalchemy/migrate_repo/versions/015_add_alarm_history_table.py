@@ -45,13 +45,13 @@ def upgrade(migrate_engine):
 
     if migrate_engine.name in ['mysql', 'postgresql']:
         indices = [Index('ix_alarm_history_alarm_id',
-                         alarm_history.c.alarm_id),
+                         alarm_history.c.alarm_id, mysql_length=50),
                    Index('ix_alarm_history_on_behalf_of',
-                         alarm_history.c.on_behalf_of),
+                         alarm_history.c.on_behalf_of, mysql_length=50),
                    Index('ix_alarm_history_project_id',
-                         alarm_history.c.project_id),
+                         alarm_history.c.project_id, mysql_length=50),
                    Index('ix_alarm_history_on_user_id',
-                         alarm_history.c.user_id)]
+                         alarm_history.c.user_id, mysql_length=50)]
 
         for index in indices:
             index.create(migrate_engine)
