@@ -300,6 +300,9 @@ class AlarmChange(Base):
 class EventType(Base):
     """Types of event records."""
     __tablename__ = 'event_type'
+    __table_args__ = (
+        Index('ix_event_type_desc', 'desc', mysql_limit=32),
+    )
 
     id = Column(Integer, primary_key=True)
     desc = Column(String(255), unique=True)
@@ -322,8 +325,10 @@ class Event(Base):
     message_id = Column(String(50), unique=True)
     generated = Column(PreciseTimestamp())
 
-    event_type_id = Column(Integer, ForeignKey('event_type.id'))
-    event_type = relationship("EventType", backref=backref('event_type'))
+    event_type_id = Column(Integer)
+    event_type = relationship("EventType", backref=backref('event_type'),
+                              foreign_keys=[event_type_id],
+                              primaryjoin="EventType.id==Event.event_type_id")
 
     def __init__(self, message_id, event_type, generated):
         self.message_id = message_id
@@ -348,7 +353,8 @@ class TraitType(Base):
     __tablename__ = 'trait_type'
     __table_args__ = (
         UniqueConstraint('desc', 'data_type', name='tt_unique'),
-        Index('ix_trait_type', 'desc')
+        Index('ix_trait_type_desc', 'desc', mysql_limit=32),
+        Index('ix_trait_type_data_type', 'data_type')
     )
 
     id = Column(Integer, primary_key=True)
@@ -366,15 +372,15 @@ class TraitType(Base):
 class Trait(Base):
     __tablename__ = 'trait'
     __table_args__ = (
-        Index('ix_trait_t_int', 't_int'),
-        Index('ix_trait_t_string', 't_string'),
-        Index('ix_trait_t_datetime', 't_datetime'),
-        Index('ix_trait_t_float', 't_float'),
+        Index('ix_trait_trait_type', 'trait_type_id'),
+        Index('ix_trait_event', 'event_id')
     )
     id = Column(Integer, primary_key=True)
 
-    trait_type_id = Column(Integer, ForeignKey('trait_type.id'))
-    trait_type = relationship("TraitType", backref=backref('trait_type'))
+    trait_type_id = Column(Integer)
+    trait_type = relationship("TraitType", backref=backref('trait_type'),
+                              foreign_keys=[trait_type_id],
+                              primaryjoin="TraitType.id==Trait.trait_type_id")
 
     t_string = Column(String(255), nullable=True, default=None)
     t_float = Column(Float, nullable=True, default=None)
@@ -382,7 +388,9 @@ class Trait(Base):
     t_datetime = Column(PreciseTimestamp(), nullable=True, default=None)
 
     event_id = Column(Integer, ForeignKey('event.id'))
-    event = relationship("Event", backref=backref('event', order_by=id))
+    event = relationship("Event", backref=backref('event', order_by=id),
+                         foreign_keys=[event_id],
+                         primaryjoin="Event.id==Trait.event_id")
 
     _value_map = {api_models.Trait.TEXT_TYPE: 't_string',
                   api_models.Trait.FLOAT_TYPE: 't_float',
