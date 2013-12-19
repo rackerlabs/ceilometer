@@ -953,8 +953,8 @@ class Connection(base.Connection):
         with session.begin(subtransactions=True):
             event_type = self._get_or_create_event_type(event_model.event_type,
                                                         session=session)
-            generated = utils.dt_to_decimal(event_model.generated)
-            event = models.Event(event_model.message_id, event_type, generated)
+            event = models.Event(event_model.message_id, event_type,
+                                 event_model.generated)
             session.add(event)
             # NOTE(apmelton) We need to flush to get the event's ID so that we
             # can bulk insert the traits.
