@@ -918,8 +918,6 @@ class Connection(base.Connection):
         fields = {'t_string': None, 't_float': None,
                   't_int': None, 't_datetime': None}
         value = trait_model.value
-        if trait_model.dtype == api_models.Trait.DATETIME_TYPE:
-            value = utils.dt_to_decimal(value)
         fields[value_map[trait_model.dtype]] = value
         fields['trait_type_id'] = trait_type.id
         fields['event_id'] = event.id
